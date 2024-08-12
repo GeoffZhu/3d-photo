@@ -2,7 +2,8 @@ const Jimp = require('jimp')
 const kMeans = require('kmeans-js')
 const ColorThief = require('colorthief')
 
-const INPUT_IMAGE = '/Users/bytedance/Desktop/1.jpg'
+const INPUT_IMAGE = '../images/input8.png'
+const COLOR_COUNTS = 4
 
 ;(async function main() {
   await genByKmeans()
@@ -47,7 +48,8 @@ async function genByKmeans() {
 }
 async function genByColorThief() {
   const image = await Jimp.read(INPUT_IMAGE)
-  const colors = await ColorThief.getPalette('input.png', 4)
+  // const colors = await ColorThief.getPalette(INPUT_IMAGE, COLOR_COUNTS)
+  const colors = [[254,44,2],[34, 245,238], [255,255,255], [0,0,0]]
   // 遍历图片的所有像素
   image
     .pixelate(0.4)
@@ -98,7 +100,7 @@ const getColorsByKmeans = async (image) => {
   )
   // 使用kmeans聚类算法将像素点分成4类
   var km = new kMeans({
-    K: 4,
+    K: COLOR_COUNTS,
   })
   km.cluster(pixels)
   while (km.step()) {

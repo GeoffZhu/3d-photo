@@ -4,15 +4,48 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3D Model from Image</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/STLExporter.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/GLTFExporter.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/utils/BufferGeometryUtils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/OBJExporter.js"></script>
+    <script>
+      THREE.SceneUtils.createMeshesFromInstancedMesh = (instancedMesh) => {
+        var group = new THREE.Group()
+
+        var count = instancedMesh.count
+        var geometry = instancedMesh.geometry
+        var material = instancedMesh.material
+
+        for (var i = 0; i < count; i++) {
+          var mesh = new THREE.Mesh(geometry, material)
+
+          instancedMesh.getMatrixAt(i, mesh.matrix)
+          mesh.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+
+          group.add(mesh)
+        }
+
+        group.copy(instancedMesh)
+        group.updateMatrixWorld() // ensure correct world matrices of meshes
+
+        return group
+      }
+    </script>
   </head>
+
   <body>
-    <input type="file" id="imageInput" accept="image/*" />
+    <div>
+      <input type="file" id="imageInput" accept="image/*" />
+      <button id="export">Export STL</button>
+    </div>
     <script>
       document
         .getElementById('imageInput')
@@ -51,8 +84,8 @@
       function create3DModelFromImage(img) {
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
-        canvas.width = img.width
-        canvas.height = img.height
+        canvas.width = img.width - 30
+        canvas.height = img.height - 30
         ctx.drawImage(img, 0, 0)
 
         // Step 1: Read the pixels
@@ -62,7 +95,6 @@
 
         for (let y = 0; y < imageData.height; y++) {
           for (let x = 0; x < imageData.width; x++) {
-            
             const index = (y * imageData.width + x) * 4
             const r = imageData.data[index]
             const g = imageData.data[index + 1]
@@ -86,36 +118,31 @@
         }
 
         // Step 3: Create 3D model
-        const layerHeight = 4
-        const pixelSize = 1
+        const layerHeight = 0.4
+        const pixelSize = 0.2
 
         const colorKeys = Object.keys(colors)
         colorKeys.forEach((color, index) => {
-          // if (index === 0) {
-          //   const geometry = new THREE.BoxGeometry(
-          //     (canvas.width) * pixelSize,
-          //     (canvas.height) * pixelSize,
-          //     layerHeight
-          //   )
-          //   const material = new THREE.MeshBasicMaterial({ color: `#${color}` })
-          //   const layer = new THREE.Group()
-            
-          //   const pixelMesh = new THREE.Mesh(geometry, material)
-          //   pixelMesh.position.set(
-          //     0,
-          //     0,
-          //     0
-          //   )
-          //   layer.add(pixelMesh)
-          //   scene.add(layer)
-          //   return
-          // }
-          
-          const geometry = new THREE.BoxGeometry(
-            pixelSize,
-            pixelSize,
-            layerHeight
-          )
+          if (index === 0) {
+            const material = new THREE.MeshBasicMaterial({ color: `#${color}` })
+            const layer = new THREE.Group()
+
+            const geometry = new THREE.BoxGeometry(
+              (canvas.width) * pixelSize,
+              (canvas.height) * pixelSize,
+              layerHeight
+            )
+            const pixelMesh = new THREE.Mesh(geometry, material)
+            pixelMesh.position.set(
+              0,
+              0,
+              0
+            )
+            layer.add(pixelMesh)
+            scene.add(layer)
+            return
+          }
+
           const material = new THREE.MeshBasicMaterial({ color: `#${color}` })
           const layer = new THREE.Group()
 
@@ -126,31 +153,60 @@
             )
           }
 
-          // 通过 InstancedMesh 合并一层的所有像素点，但导出工具不支持 InstancedMesh
-          const instancedMesh = new THREE.InstancedMesh(geometry, material, layerPoints.length);
-          const matrix = new THREE.Matrix4();
-          layerPoints.forEach(({ x, y }, pointIndex) => {
-            // 计算每个实例的变换矩阵
-            matrix.setPosition(
-              x * pixelSize - (canvas.width * pixelSize) / 2,
-              (canvas.height * pixelSize) / 2 - y * pixelSize,
-              index * layerHeight
-            );
-            // 将变换矩阵应用到 InstancedMesh 的实例
-            instancedMesh.setMatrixAt(pointIndex, matrix);
+          layerPoints.sort((a, b) => {
+            if (a.y === b.y) return a.x - b.x; // y 相同，按 x 排序
+            return a.y - b.y; // 按 y 排序
           });
-          layer.add(instancedMesh);
+          let countX = 0
+          let startX = layerPoints[0].x
+          let startY = layerPoints[0].y
+          layerPoints.forEach(({ x, y }, pointIndex) => {
+            const prevLayerPoint = layerPoints[pointIndex -  1]
+            const prevX = prevLayerPoint?.x
+            const prevY = prevLayerPoint?.y
+            if (!prevLayerPoint) {
+              countX++;
+            } else if (prevY === y && (prevX + 1) === x) {
+              countX++;
+            } else {
+              const geometry = new THREE.BoxGeometry(
+                pixelSize * countX,
+                pixelSize,
+                layerHeight
+              )
 
-          // 每个像素点单独导入 layer
-          // layerPoints.forEach(({ x, y }) => {
-          //   const pixelMesh = new THREE.Mesh(geometry, material)
-          //   pixelMesh.position.set(
-          //     x * pixelSize - (canvas.width * pixelSize) / 2,
-          //     (canvas.height * pixelSize) / 2 - y * pixelSize,
-          //     index * layerHeight
-          //   )
-          //   layer.add(pixelMesh)
-          // })
+              const pixelMesh = new THREE.Mesh(geometry, material)
+
+              pixelMesh.position.set(
+                startX * pixelSize + (countX * pixelSize) / 2 - (canvas.width * pixelSize) / 2,
+                (canvas.height * pixelSize) / 2 - startY * pixelSize,
+                index * layerHeight
+              )
+              layer.add(pixelMesh)
+
+
+              countX = 1
+              startX = x
+              startY = y
+            }
+          })
+
+          if (countX > 0) {
+            const geometry = new THREE.BoxGeometry(
+              pixelSize * countX,
+              pixelSize,
+              layerHeight
+            )
+
+            const pixelMesh = new THREE.Mesh(geometry, material)
+
+            pixelMesh.position.set(
+              startX * pixelSize + (countX * pixelSize) / 2 - (canvas.width * pixelSize) / 2,
+              (canvas.height * pixelSize) / 2 - startY * pixelSize,
+              index * layerHeight
+            )
+            layer.add(pixelMesh);
+          }
 
           scene.add(layer)
         })
@@ -211,24 +267,19 @@
         })
       }
       function exportOBJ() {
-        const exporter = new THREE.OBJExporter();
-        const result = exporter.parse(scene);
+        const exporter = new THREE.OBJExporter()
+        const result = exporter.parse(scene)
 
         // Create a downloadable link for the OBJ file
-        const blob = new Blob([result], { type: 'text/plain' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'model.obj';
-        link.click();
+        const blob = new Blob([result], { type: 'text/plain' })
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.download = 'model.obj'
+        link.click()
       }
       // Create a button to trigger STL export
-      const exportButton = document.createElement('button')
-      exportButton.textContent = 'Export STL'
-      exportButton.style.position = 'absolute'
-      exportButton.style.top = '10px'
-      exportButton.style.right = '10px'
-      exportButton.addEventListener('click', exportOBJ)
-      document.body.appendChild(exportButton)
+      const exportButton = document.querySelector('#export')
+      exportButton.addEventListener('click', exportSTL)
     </script>
   </body>
 </html>
