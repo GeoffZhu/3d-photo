@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image to 2D Layer</title>
+    <style>
+      canvas {
+        border: 1px solid black;
+      }
+    </style>
+  </head>
+  <body>
+    <input type="file" id="imageInput" accept="image/*" />
+    <canvas id="canvas"></canvas>
+    <script>
+      document
+        .getElementById('imageInput')
+        .addEventListener('change', handleImageUpload)
+
+      function handleImageUpload(event) {
+        const file = event.target.files[0]
+        if (!file) return
+
+        const reader = new FileReader()
+        reader.onload = function (e) {
+          const img = new Image()
+          img.onload = function () {
+            processImage(img)
+          }
+          img.src = e.target.result
+        }
+        reader.readAsDataURL(file)
+      }
+
+      function processImage(img) {
+        const canvas = document.getElementById('canvas')
+        const ctx = canvas.getContext('2d')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx.drawImage(img, 0, 0)
+
+        const imageData = ctx.getImageData(0, 0, img.width, img.height)
+        const pixels = []
+
+        // Collect pixel data
+        for (let y = 0; y < img.height; y++) {
+          for (let x = 0; x < img.width; x++) {
+            const index = (y * img.width + x) * 4
+            const r = imageData.data[index]
+            const g = imageData.data[index + 1]
+            const b = imageData.data[index + 2]
+            const a = imageData.data[index + 3]
+            const color = `rgb(${r},${g},${b})`
+            pixels.push({ x, y, color })
+          }
+        }
+
+        // Group pixels by color
+        const colorGroups = {}
+        pixels.forEach((pixel) => {
+          if (!colorGroups[pixel.color]) {
+            colorGroups[pixel.color] = []
+          }
+          colorGroups[pixel.color].push(pixel)
+        })
+
+        // Sort colors
+        const colors = Object.keys(colorGroups)
+
+        // Create a new canvas to draw each layer
+        const layers = colors.map((color) => {
+          const layerCanvas = document.createElement('canvas')
+          const layerCtx = layerCanvas.getContext('2d')
+          layerCanvas.width = img.width
+          layerCanvas.height = img.height
+          layerCtx.fillStyle = color
+          layerCtx.clearRect(0, 0, img.width, img.height)
+
+          // Draw only the pixels of the current color
+          colorGroups[color].forEach((pixel) => {
+            layerCtx.fillRect(pixel.x, pixel.y, 1, 1)
+          })
+
+          return layerCanvas
+        })
+
+        // Display layers (you can use WebGL or other methods to create a 3D model)
+        layers.forEach((layer, index) => {
+          document.body.appendChild(layer)
+        })
+      }
+    </script>
+  </body>
+</html>

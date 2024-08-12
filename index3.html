@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Model from Image</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/STLExporter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/GLTFExporter.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/utils/BufferGeometryUtils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.139.2/examples/js/exporters/OBJExporter.js"></script>
+  </head>
+  <body>
+    <input type="file" id="imageInput" accept="image/*" />
+    <script>
+      document
+        .getElementById('imageInput')
+        .addEventListener('change', handleImageUpload)
+
+      function handleImageUpload(event) {
+        const file = event.target.files[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = function (e) {
+          const img = new Image()
+          img.onload = function () {
+            create3DModelFromImage(img)
+          }
+          img.src = e.target.result
+        }
+        reader.readAsDataURL(file)
+      }
+
+      // Initialize the scene, camera, and renderer
+      const scene = new THREE.Scene()
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      )
+      const renderer = new THREE.WebGLRenderer()
+      renderer.setSize(window.innerWidth, window.innerHeight)
+      document.body.appendChild(renderer.domElement)
+
+      // Add orbit controls for zooming and rotating
+      const controls = new THREE.OrbitControls(camera, renderer.domElement)
+
+      // Load the image and create the 3D model
+      function create3DModelFromImage(img) {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx.drawImage(img, 0, 0)
+
+        // Step 1: Read the pixels
+        const pixelData = []
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const colors = {}
+
+        for (let y = 0; y < imageData.height; y++) {
+          for (let x = 0; x < imageData.width; x++) {
+            
+            const index = (y * imageData.width + x) * 4
+            const r = imageData.data[index]
+            const g = imageData.data[index + 1]
+            const b = imageData.data[index + 2]
+            const a = imageData.data[index + 3]
+            if (a > 0) {
+              // only consider non-transparent pixels
+              const color = new THREE.Color(
+                r / 255,
+                g / 255,
+                b / 255
+              ).getHexString()
+              pixelData.push({ x, y, color })
+
+              if (!colors[color]) {
+                colors[color] = []
+              }
+              colors[color].push({ x, y })
+            }
+          }
+        }
+
+        // Step 3: Create 3D model
+        const layerHeight = 4
+        const pixelSize = 1
+
+        const colorKeys = Object.keys(colors)
+        colorKeys.forEach((color, index) => {
+          // if (index === 0) {
+          //   const geometry = new THREE.BoxGeometry(
+          //     (canvas.width) * pixelSize,
+          //     (canvas.height) * pixelSize,
+          //     layerHeight
+          //   )
+          //   const material = new THREE.MeshBasicMaterial({ color: `#${color}` })
+          //   const layer = new THREE.Group()
+            
+          //   const pixelMesh = new THREE.Mesh(geometry, material)
+          //   pixelMesh.position.set(
+          //     0,
+          //     0,
+          //     0
+          //   )
+          //   layer.add(pixelMesh)
+          //   scene.add(layer)
+          //   return
+          // }
+          
+          const geometry = new THREE.BoxGeometry(
+            pixelSize,
+            pixelSize,
+            layerHeight
+          )
+          const material = new THREE.MeshBasicMaterial({ color: `#${color}` })
+          const layer = new THREE.Group()
+
+          let layerPoints = []
+          for (let i = 0; i <= colorKeys.length - 1 - index; i++) {
+            layerPoints = layerPoints.concat(
+              colors[colorKeys[colorKeys.length - 1 - i]]
+            )
+          }
+
+          // 通过 InstancedMesh 合并一层的所有像素点，但导出工具不支持 InstancedMesh
+          const instancedMesh = new THREE.InstancedMesh(geometry, material, layerPoints.length);
+          const matrix = new THREE.Matrix4();
+          layerPoints.forEach(({ x, y }, pointIndex) => {
+            // 计算每个实例的变换矩阵
+            matrix.setPosition(
+              x * pixelSize - (canvas.width * pixelSize) / 2,
+              (canvas.height * pixelSize) / 2 - y * pixelSize,
+              index * layerHeight
+            );
+            // 将变换矩阵应用到 InstancedMesh 的实例
+            instancedMesh.setMatrixAt(pointIndex, matrix);
+          });
+          layer.add(instancedMesh);
+
+          // 每个像素点单独导入 layer
+          // layerPoints.forEach(({ x, y }) => {
+          //   const pixelMesh = new THREE.Mesh(geometry, material)
+          //   pixelMesh.position.set(
+          //     x * pixelSize - (canvas.width * pixelSize) / 2,
+          //     (canvas.height * pixelSize) / 2 - y * pixelSize,
+          //     index * layerHeight
+          //   )
+          //   layer.add(pixelMesh)
+          // })
+
+          scene.add(layer)
+        })
+
+        // Step 4: Adjust the camera
+        camera.position.z = 2
+        camera.position.y = (canvas.height * pixelSize) / 2
+        camera.position.x = -(canvas.width * pixelSize) / 2
+
+        // Adjust controls
+        controls.update()
+
+        // Render the scene
+        function animate() {
+          requestAnimationFrame(animate)
+          controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
+          renderer.render(scene, camera)
+        }
+        animate()
+      }
+
+      function exportSTL() {
+        // Ensure STLExporter is loaded
+        const exporter = new THREE.STLExporter()
+
+        // Convert scene to STL format
+        const stlData = exporter.parse(scene, { binary: true })
+
+        // Create a Blob and URL for the STL data
+        const blob = new Blob([stlData], { type: 'application/octet-stream' })
+        const url = URL.createObjectURL(blob)
+
+        // Create a link element and trigger download
+        const link = document.createElement('a')
+        link.href = url
+        link.download = 'model.stl'
+        link.click()
+
+        // Clean up
+        URL.revokeObjectURL(url)
+      }
+
+      function exportGLTF() {
+        const exporter = new THREE.GLTFExporter()
+        exporter.parse(scene, function (result) {
+          const output = JSON.stringify(result)
+          const blob = new Blob([output], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+
+          // 创建一个下载链接
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'model.glb'
+          link.click()
+
+          // 清理
+          URL.revokeObjectURL(url)
+        })
+      }
+      function exportOBJ() {
+        const exporter = new THREE.OBJExporter();
+        const result = exporter.parse(scene);
+
+        // Create a downloadable link for the OBJ file
+        const blob = new Blob([result], { type: 'text/plain' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'model.obj';
+        link.click();
+      }
+      // Create a button to trigger STL export
+      const exportButton = document.createElement('button')
+      exportButton.textContent = 'Export STL'
+      exportButton.style.position = 'absolute'
+      exportButton.style.top = '10px'
+      exportButton.style.right = '10px'
+      exportButton.addEventListener('click', exportOBJ)
+      document.body.appendChild(exportButton)
+    </script>
+  </body>
+</html>
